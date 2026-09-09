@@ -207,10 +207,10 @@ else:
     st.divider()
 
     # ---------------------------------------------------------
-    # [차트 업그레이드] HTS 프리미엄 다크 테마 & 10년 줌 기능
+    # [차트 컨트롤 업그레이드] 좌클릭 자동확대 방지 & 세로형 툴바 활성화
     # ---------------------------------------------------------
     st.subheader("📈 실시간 차트 분석 (캔들스틱 & RSI)")
-    st.caption("💡 팁: 차트 상단의 [1년/3년/10년] 버튼을 클릭하거나, 마우스 스크롤로 자유롭게 확대/축소하세요.")
+    st.caption("💡 팁: 화면을 마우스로 잡고 좌우로 자유롭게 이동(Pan)할 수 있으며, 옆면의 툴바나 마우스 휠로 확대/축소가 가능합니다.")
     chart_options = [f"{row['name']} ({row['ticker']})" for _, row in current_stocks.iterrows() if row['market'] != 'FX']
     
     if chart_options:
@@ -233,7 +233,6 @@ else:
 
             with container:
                 t = yf.Ticker(yf_ticker)
-                # 최대 10년치 데이터 로드
                 if chart_type == "일봉 (Daily)":
                     hist = t.history(period="10y", interval="1d")
                     ma_label = "일선"
@@ -250,43 +249,40 @@ else:
 
                     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.03, row_heights=[0.75, 0.25])
                     
-                    # 1. 프리미엄 캔들스틱 (테두리 제거, 쨍한 빨강/파랑 색상)
                     fig.add_trace(go.Candlestick(
                         x=hist.index, open=hist['Open'], high=hist['High'], low=hist['Low'], close=hist['Close'],
-                        increasing_line_color='#FF3B30', increasing_fillcolor='#FF3B30', # 애플/HTS 표준 레드
-                        decreasing_line_color='#007AFF', decreasing_fillcolor='#007AFF', # 애플/HTS 표준 블루
+                        increasing_line_color='#FF3B30', increasing_fillcolor='#FF3B30',
+                        decreasing_line_color='#007AFF', decreasing_fillcolor='#007AFF',
                         line_width=1, name='캔들'
                     ), row=1, col=1)
                     
-                    # 2. 이동평균선
                     colors = ['#F5A623', '#BD10E0', '#50E3C2', '#FFFFFF']
                     for idx, ma in enumerate(['5', '20', '60', '180']):
                         col_name = f"{ma}{ma_label}"
                         if col_name in hist.columns:
                             fig.add_trace(go.Scatter(x=hist.index, y=hist[col_name], mode='lines', name=col_name, line=dict(width=1.2, color=colors[idx])), row=1, col=1)
                             
-                    # 3. RSI
                     fig.add_trace(go.Scatter(x=hist.index, y=hist['RSI'], mode='lines', name='RSI', line=dict(color='#E83E8C', width=1.5)), row=2, col=1)
                     fig.add_hline(y=70, line_dash="dash", line_color="#4C525E", row=2, col=1)
                     fig.add_hline(y=30, line_dash="dash", line_color="#4C525E", row=2, col=1)
 
-                    # 4. 현재가 점선
                     last_price = hist['Close'].iloc[-1]
                     fig.add_hline(y=last_price, line_dash="dot", line_color="#FF3B30", row=1, col=1)
 
-                    # 5. 다크 테마 레이아웃 및 10년 내비게이터
                     fig.update_layout(
                         template='plotly_dark',
-                        plot_bgcolor='#131722', # 트레이딩뷰 배경색
+                        plot_bgcolor='#131722',
                         paper_bgcolor='#131722',
                         xaxis_rangeslider_visible=False, 
                         height=600, 
                         margin=dict(l=10, r=50, t=30, b=10), 
                         showlegend=False,
                         hovermode='x unified',
+                        dragmode='pan', # [핵심 수정] 좌클릭 시 박스 확대 방지, 화면 끌기로 변경
+                        modebar=dict(orientation='v'), # [핵심 수정] 툴바를 세로형(사이드)으로 배치
                         xaxis=dict(
                             showgrid=True, gridcolor='#2B2B43',
-                            rangeselector=dict( # 상단 기간 선택 버튼
+                            rangeselector=dict(
                                 buttons=list([
                                     dict(count=1, label="1개월", step="month", stepmode="backward"),
                                     dict(count=6, label="6개월", step="month", stepmode="backward"),
@@ -298,17 +294,22 @@ else:
                                 bgcolor='#2B2B43', activecolor='#4C525E'
                             )
                         ),
-                        yaxis=dict(side='right', showgrid=True, gridcolor='#2B2B43', tickformat=",.0f"), # 가격을 우측으로
+                        yaxis=dict(side='right', showgrid=True, gridcolor='#2B2B43', tickformat=",.0f"),
                         yaxis2=dict(side='right', showgrid=True, gridcolor='#2B2B43')
                     )
                     
-                    # 처음 띄울 때는 최근 1년치(일봉) 또는 3년치(월봉)만 포커스해서 보여줌
                     if chart_type == "일봉 (Daily)":
                         fig.update_xaxes(range=[hist.index[-250], hist.index[-1]], row=1, col=1)
                     else:
                         fig.update_xaxes(range=[hist.index[-36], hist.index[-1]], row=1, col=1)
 
-                    st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True, 'displayModeBar': False})
+                    # [핵심 수정] displayModeBar를 True로 변경하여 툴바 강제 활성화 (불필요한 버튼 숨김)
+                    st.plotly_chart(fig, use_container_width=True, config={
+                        'scrollZoom': True, 
+                        'displayModeBar': True,
+                        'displaylogo': False,
+                        'modeBarButtonsToRemove': ['lasso2d', 'select2d']
+                    })
                 else:
                     st.warning("데이터를 불러올 수 없습니다.")
 
