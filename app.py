@@ -144,19 +144,84 @@ else:
     st.divider()
 
     # ---------------------------------------------------------
-    # [새로 추가됨] 전문가용 비교 차트 뷰어 (캔들스틱 + 이평선 + RSI)
+    # [새로 추가됨] 💼 내 포트폴리오 (계좌 시뮬레이터)
     # ---------------------------------------------------------
-    st.subheader("📈 실시간 차트 분석 (캔들스틱 & RSI)")
+    st.subheader("💼 내 계좌 실시간 수익률")
+    st.caption("표 안의 데이터를 클릭해 엑셀처럼 직접 티커, 평단가, 수량을 입력해보세요. (달러/원화 자동 계산)")
     
+    if 'portfolio' not in st.session_state:
+        # 최초 샘플 데이터
+        st.session_state.portfolio = pd.DataFrame({
+            "티커": ["NVDA", "005930", "BTC-USD"],
+            "매수단가": [100.0, 70000.0, 50000.0],
+            "보유수량": [10.0, 50.0, 0.5]
+        })
+
+    # 편집 가능한 엑셀 형태의 표 출력
+    edited_portfolio = st.data_editor(st.session_state.portfolio, num_rows="dynamic", use_container_width=True)
+    st.session_state.portfolio = edited_portfolio
+
+    if not edited_portfolio.empty:
+        results = []
+        total_invest_krw = 0
+        total_eval_krw = 0
+
+        for _, row in edited_portfolio.iterrows():
+            tk = str(row['티커']).strip().upper()
+            buy_price = pd.to_numeric(row['매수단가'], errors='coerce')
+            qty = pd.to_numeric(row['보유수량'], errors='coerce')
+
+            if pd.isna(buy_price) or pd.isna(qty):
+                continue
+
+            match = current_stocks[current_stocks['ticker'].str.upper() == tk]
+            if not match.empty:
+                m_row = match.iloc[0]
+                cur_price = m_row['price']
+                is_foreign = m_row['market'] in ['US', 'CRYPTO']
+                
+                # 외화는 환율 곱하고, 한국 주식은 1을 곱함
+                rate = fx_rate if is_foreign else 1.0
+                
+                invest_krw = buy_price * qty * rate
+                eval_krw = cur_price * qty * rate
+                profit = eval_krw - invest_krw
+                profit_pct = (profit / invest_krw * 100) if invest_krw > 0 else 0
+                
+                total_invest_krw += invest_krw
+                total_eval_krw += eval_krw
+
+                results.append({
+                    "종목명": m_row['name'],
+                    "티커": tk,
+                    "매수단가": f"${buy_price:,.2f}" if is_foreign else f"{buy_price:,.0f}원",
+                    "현재가": f"${cur_price:,.2f}" if is_foreign else f"{cur_price:,.0f}원",
+                    "수량": qty,
+                    "투자원금(원)": f"{invest_krw:,.0f}",
+                    "평가금액(원)": f"{eval_krw:,.0f}",
+                    "수익금(원)": f"{profit:,.0f}",
+                    "수익률(%)": round(profit_pct, 2)
+                })
+
+        if results:
+            res_df = pd.DataFrame(results)
+            st.dataframe(res_df, use_container_width=True)
+            
+            tot_profit = total_eval_krw - total_invest_krw
+            tot_pct = (tot_profit / total_invest_krw * 100) if total_invest_krw > 0 else 0
+            st.metric("💰 총 계좌 평가 수익", f"{tot_profit:,.0f} 원", f"{tot_pct:.2f}%")
+        else:
+            st.info("입력하신 티커가 현재 대시보드 시세 표에 존재하지 않습니다. (목록에 있는 티커를 정확히 입력해주세요)")
+
+    st.divider()
+
+    st.subheader("📈 실시간 차트 분석 (캔들스틱 & RSI)")
     chart_options = [f"{row['name']} ({row['ticker']})" for _, row in current_stocks.iterrows() if row['market'] != 'FX']
     
     if chart_options:
         chart_type = st.radio("차트 주기", ["일봉 (Daily)", "월봉 (Monthly)"], horizontal=True)
-        
-        # 화면을 정확히 2개로 나누기 (비교 분석용)
         col1, col2 = st.columns(2)
         
-        # RSI 계산 함수 (14일 Wilders EMA 방식)
         def calculate_rsi(series, period=14):
             delta = series.diff()
             up = delta.clip(lower=0)
@@ -166,7 +231,6 @@ else:
             rs = ema_up / ema_down
             return 100 - (100 / (1 + rs))
 
-        # 차트 그리기 전문 함수
         def draw_professional_chart(selected_option, container):
             selected_ticker = selected_option.split("(")[-1].replace(")", "")
             market_type = current_stocks[current_stocks['ticker'] == selected_ticker]['market'].values[0]
@@ -184,34 +248,24 @@ else:
                     display_tail = 60
 
                 if not hist.empty:
-                    # 이평선 및 RSI 계산
                     hist[f'5{ma_label}'] = hist['Close'].rolling(5).mean()
                     hist[f'20{ma_label}'] = hist['Close'].rolling(20).mean()
                     hist[f'60{ma_label}'] = hist['Close'].rolling(60).mean()
                     hist[f'180{ma_label}'] = hist['Close'].rolling(180).mean()
                     hist['RSI'] = calculate_rsi(hist['Close'])
-                    
                     hist = hist.tail(display_tail)
 
-                    # 2층 구조 차트 만들기 (위: 캔들 / 아래: RSI)
-                    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
-                                        vertical_spacing=0.05, row_heights=[0.7, 0.3])
-                    
-                    # 1. 캔들차트 (한국식 빨강/파랑 색상 적용)
+                    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
                     fig.add_trace(go.Candlestick(x=hist.index, open=hist['Open'], high=hist['High'], low=hist['Low'], close=hist['Close'],
                                                  increasing_line_color='red', decreasing_line_color='blue', name='캔들'), row=1, col=1)
                     
-                    # 2. 이동평균선
                     colors = ['orange', 'purple', 'green', 'black']
                     for idx, ma in enumerate(['5', '20', '60', '180']):
                         col_name = f"{ma}{ma_label}"
                         if col_name in hist.columns:
-                            fig.add_trace(go.Scatter(x=hist.index, y=hist[col_name], mode='lines', 
-                                                     name=col_name, line=dict(width=1.5, color=colors[idx])), row=1, col=1)
+                            fig.add_trace(go.Scatter(x=hist.index, y=hist[col_name], mode='lines', name=col_name, line=dict(width=1.5, color=colors[idx])), row=1, col=1)
                             
-                    # 3. RSI 차트
                     fig.add_trace(go.Scatter(x=hist.index, y=hist['RSI'], mode='lines', name='RSI', line=dict(color='magenta')), row=2, col=1)
-                    # RSI 기준선 (30, 70)
                     fig.add_hline(y=70, line_dash="dash", line_color="gray", row=2, col=1)
                     fig.add_hline(y=30, line_dash="dash", line_color="gray", row=2, col=1)
 
@@ -220,12 +274,10 @@ else:
                 else:
                     st.warning("데이터를 불러올 수 없습니다.")
 
-        # 좌측 차트
         with col1:
             sel1 = st.selectbox("비교 종목 1", chart_options, index=0)
             draw_professional_chart(sel1, st.container())
             
-        # 우측 차트
         with col2:
             sel2 = st.selectbox("비교 종목 2", chart_options, index=1 if len(chart_options) > 1 else 0)
             draw_professional_chart(sel2, st.container())
@@ -243,4 +295,4 @@ else:
         st.subheader("📰 최신 뉴스")
         news_df = load_df("SELECT DISTINCT title, link, source FROM market_news LIMIT 10")
         for _, r in news_df.iterrows():
-            st.markdown(f"**[{r['source']}]** [{r['title']}]({r['link']})")
+            st.markdown(f"**[{r['source']}]** [{r['title']}]({r['link']})")        
