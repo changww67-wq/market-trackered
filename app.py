@@ -8,7 +8,7 @@ import streamlit as st
 # 1. 화면 렌더링 최우선 
 st.set_page_config(page_title="글로벌 증시 모니터", layout="wide", page_icon="📈")
 st.title("🌐 글로벌 증시 실시간 대시보드")
-st.caption("미국/한국 주요 기업 시세 및 뉴스 통합 피드")
+st.caption("미국/한국 주요 기업 시세, 환율 및 뉴스 통합 피드")
 
 DB_PATH = "market_data.db"
 
@@ -28,6 +28,15 @@ def fetch_market_data():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # [추가됨] 0. 실시간 원/달러 환율 수집 (FX)
+    try:
+        t = yf.Ticker("KRW=X")
+        p = t.fast_info.last_price
+        prev = t.fast_info.previous_close
+        pct = ((p - prev) / prev * 100) if prev else 0.0
+        c.execute("INSERT INTO stock_prices VALUES (?, ?, 'FX', ?, ?, ?)", ("USD/KRW", "원/달러 환율", p, round(pct, 2), now))
+    except: pass
 
     # 1. 미국 주식 (US)
     us_stocks = {
@@ -51,7 +60,7 @@ def fetch_market_data():
                     c.execute("INSERT INTO earnings VALUES (?, ?, ?)", (sym, name, str(dates[0]).split(" ")[0]))
         except: pass
 
-    # 2. 암호화폐 (CRYPTO) - 완전히 분리된 그룹으로 수집
+    # 2. 암호화폐 (CRYPTO)
     crypto_assets = {
         "BTC-USD": "비트코인",
         "ETH-USD": "이더리움", 
@@ -118,9 +127,16 @@ else:
     latest_time = stocks_df['updated_at'].max()
     current_stocks = stocks_df[stocks_df['updated_at'] == latest_time]
 
+    # [추가됨] 맨 위에 환율 정보 표시
+    fx_df = current_stocks[current_stocks['market'] == 'FX']
+    if not fx_df.empty:
+        fx_row = fx_df.iloc[0]
+        # 환율을 눈에 띄게 큰 위젯으로 배치
+        st.metric(label="💵 현재 원/달러 환율", value=f"{fx_row['price']:,.2f} 원", delta=f"{fx_row['change_pct']}%")
+        st.divider()
+
     st.subheader("📊 주요 기업 시세")
     
-    # 탭을 3개로 늘리고 데이터 분류 적용
     t1, t2, t3 = st.tabs(["🇺🇸 미국 증시", "🇰🇷 한국 증시", "🪙 암호화폐"])
     with t1: st.dataframe(current_stocks[current_stocks['market'] == 'US'], use_container_width=True)
     with t2: st.dataframe(current_stocks[current_stocks['market'] == 'KR'], use_container_width=True)
