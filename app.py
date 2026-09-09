@@ -143,21 +143,17 @@ else:
     
     st.divider()
 
-    # ---------------------------------------------------------
-    # [새로 추가됨] 💼 내 포트폴리오 (계좌 시뮬레이터)
-    # ---------------------------------------------------------
+    # 계좌 시뮬레이터
     st.subheader("💼 내 계좌 실시간 수익률")
-    st.caption("표 안의 데이터를 클릭해 엑셀처럼 직접 티커, 평단가, 수량을 입력해보세요. (달러/원화 자동 계산)")
+    st.caption("표 안의 데이터를 클릭해 엑셀처럼 직접 티커, 평단가, 수량을 입력해보세요.")
     
     if 'portfolio' not in st.session_state:
-        # 최초 샘플 데이터
         st.session_state.portfolio = pd.DataFrame({
             "티커": ["NVDA", "005930", "BTC-USD"],
             "매수단가": [100.0, 70000.0, 50000.0],
             "보유수량": [10.0, 50.0, 0.5]
         })
 
-    # 편집 가능한 엑셀 형태의 표 출력
     edited_portfolio = st.data_editor(st.session_state.portfolio, num_rows="dynamic", use_container_width=True)
     st.session_state.portfolio = edited_portfolio
 
@@ -180,9 +176,7 @@ else:
                 cur_price = m_row['price']
                 is_foreign = m_row['market'] in ['US', 'CRYPTO']
                 
-                # 외화는 환율 곱하고, 한국 주식은 1을 곱함
                 rate = fx_rate if is_foreign else 1.0
-                
                 invest_krw = buy_price * qty * rate
                 eval_krw = cur_price * qty * rate
                 profit = eval_krw - invest_krw
@@ -206,16 +200,14 @@ else:
         if results:
             res_df = pd.DataFrame(results)
             st.dataframe(res_df, use_container_width=True)
-            
             tot_profit = total_eval_krw - total_invest_krw
             tot_pct = (tot_profit / total_invest_krw * 100) if total_invest_krw > 0 else 0
             st.metric("💰 총 계좌 평가 수익", f"{tot_profit:,.0f} 원", f"{tot_pct:.2f}%")
-        else:
-            st.info("입력하신 티커가 현재 대시보드 시세 표에 존재하지 않습니다. (목록에 있는 티커를 정확히 입력해주세요)")
 
     st.divider()
 
     st.subheader("📈 실시간 차트 분석 (캔들스틱 & RSI)")
+    st.caption("💡 팁: 차트 위에 마우스를 올리고 **스크롤(휠)을 위아래로 돌리면 차트가 확대/축소** 됩니다!")
     chart_options = [f"{row['name']} ({row['ticker']})" for _, row in current_stocks.iterrows() if row['market'] != 'FX']
     
     if chart_options:
@@ -270,7 +262,9 @@ else:
                     fig.add_hline(y=30, line_dash="dash", line_color="gray", row=2, col=1)
 
                     fig.update_layout(xaxis_rangeslider_visible=False, height=550, margin=dict(l=0, r=0, t=10, b=0), showlegend=False)
-                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # [추가됨] config 옵션으로 스크롤 줌(마우스 휠 확대/축소) 활성화
+                    st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True})
                 else:
                     st.warning("데이터를 불러올 수 없습니다.")
 
@@ -295,4 +289,4 @@ else:
         st.subheader("📰 최신 뉴스")
         news_df = load_df("SELECT DISTINCT title, link, source FROM market_news LIMIT 10")
         for _, r in news_df.iterrows():
-            st.markdown(f"**[{r['source']}]** [{r['title']}]({r['link']})")        
+            st.markdown(f"**[{r['source']}]** [{r['title']}]({r['link']})")
