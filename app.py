@@ -5,7 +5,7 @@ import feedparser
 from datetime import datetime
 import streamlit as st
 
-# 1. 화면 렌더링 최우선 (하얀 화면 무한 로딩 방지)
+# 1. 화면 렌더링 최우선 
 st.set_page_config(page_title="글로벌 증시 모니터", layout="wide", page_icon="📈")
 st.title("🌐 글로벌 증시 실시간 대시보드")
 st.caption("미국/한국 주요 기업 시세 및 뉴스 통합 피드")
@@ -29,8 +29,11 @@ def fetch_market_data():
     c = conn.cursor()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # 미국 주식
-    us_stocks = {"AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "TSLA": "Tesla", "AMD": "ASML", "GOOGLE": "BITCOIN"}
+    # 1. 미국 주식 (US)
+    us_stocks = {
+        "AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "TSLA": "Tesla",
+        "AMD": "AMD", "IONQ": "IonQ"
+    }
     for sym, name in us_stocks.items():
         try:
             t = yf.Ticker(sym)
@@ -38,7 +41,9 @@ def fetch_market_data():
             prev = t.fast_info.previous_close
             pct = ((p - prev) / prev * 100) if prev else 0.0
             c.execute("INSERT INTO stock_prices VALUES (?, ?, 'US', ?, ?, ?)", (sym, name, p, round(pct, 2), now))
+        except: pass
             
+        try:
             cal = t.calendar
             if cal is not None and not cal.empty and "Earnings Date" in cal.index:
                 dates = cal.loc["Earnings Date"].dropna().tolist()
@@ -46,7 +51,22 @@ def fetch_market_data():
                     c.execute("INSERT INTO earnings VALUES (?, ?, ?)", (sym, name, str(dates[0]).split(" ")[0]))
         except: pass
 
-    # 한국 주식 (야후에서 .KS로 수집)
+    # 2. 암호화폐 (CRYPTO) - 완전히 분리된 그룹으로 수집
+    crypto_assets = {
+        "BTC-USD": "비트코인",
+        "ETH-USD": "이더리움", 
+        "SOL-USD": "솔라나"
+    }
+    for sym, name in crypto_assets.items():
+        try:
+            t = yf.Ticker(sym)
+            p = t.fast_info.last_price
+            prev = t.fast_info.previous_close
+            pct = ((p - prev) / prev * 100) if prev else 0.0
+            c.execute("INSERT INTO stock_prices VALUES (?, ?, 'CRYPTO', ?, ?, ?)", (sym, name, p, round(pct, 2), now))
+        except: pass
+
+    # 3. 한국 주식 (KR)
     kr_stocks = {"005930.KS": "삼성전자", "000660.KS": "SK하이닉스", "035420.KS": "NAVER", "005380.KS": "현대차"}
     for sym, name in kr_stocks.items():
         try:
@@ -57,7 +77,7 @@ def fetch_market_data():
             c.execute("INSERT INTO stock_prices VALUES (?, ?, 'KR', ?, ?, ?)", (sym.replace(".KS", ""), name, p, round(pct, 2), now))
         except: pass
 
-    # 뉴스 수집
+    # 4. 뉴스 수집
     urls = [
         ("https://news.google.com/rss/search?q=증시&hl=ko&gl=KR&ceid=KR:ko", "국내증시"),
         ("https://finance.yahoo.com/news/rssindex", "Yahoo US")
@@ -72,7 +92,7 @@ def fetch_market_data():
     conn.commit()
     conn.close()
 
-# 2. 사이드바 수동 조작 (자동 실행으로 인한 오류 원천 차단)
+# 사이드바 컨트롤
 st.sidebar.header("⚙️ 컨트롤 패널")
 if st.sidebar.button("🔄 즉시 데이터 수집/갱신"):
     with st.spinner("전세계 증시 데이터를 끌어오는 중입니다... (약 10초 소요)"):
@@ -80,7 +100,7 @@ if st.sidebar.button("🔄 즉시 데이터 수집/갱신"):
     st.sidebar.success("수집 완료!")
     st.rerun()
 
-# 3. 화면 데이터 표시 로직
+# 화면 데이터 표시 로직
 def load_df(query):
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -93,22 +113,18 @@ def load_df(query):
 stocks_df = load_df("SELECT * FROM stock_prices ORDER BY updated_at DESC")
 
 if stocks_df.empty:
-    # 데이터가 없을 때는 하얀 화면이 아니라 안내 메시지 출력
     st.info("👈 왼쪽 메뉴에서 '즉시 데이터 수집/갱신' 버튼을 눌러주세요. (최초 1회 데이터 수집 필요)")
 else:
     latest_time = stocks_df['updated_at'].max()
     current_stocks = stocks_df[stocks_df['updated_at'] == latest_time]
 
     st.subheader("📊 주요 기업 시세")
-    cols = st.columns(min(len(current_stocks), 5))
-    for idx, row in current_stocks.head(5).iterrows():
-        with cols[idx % 5]:
-            unit = "$" if row["market"] == "US" else "원"
-            st.metric(label=row['name'], value=f"{row['price']:,} {unit}", delta=f"{row['change_pct']}%")
-
-    t1, t2 = st.tabs(["🇺🇸 미국 증시", "🇰🇷 한국 증시"])
+    
+    # 탭을 3개로 늘리고 데이터 분류 적용
+    t1, t2, t3 = st.tabs(["🇺🇸 미국 증시", "🇰🇷 한국 증시", "🪙 암호화폐"])
     with t1: st.dataframe(current_stocks[current_stocks['market'] == 'US'], use_container_width=True)
     with t2: st.dataframe(current_stocks[current_stocks['market'] == 'KR'], use_container_width=True)
+    with t3: st.dataframe(current_stocks[current_stocks['market'] == 'CRYPTO'], use_container_width=True)
 
     st.divider()
     c1, c2 = st.columns([1, 1])
