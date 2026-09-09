@@ -1,7 +1,4 @@
 streamlit
 pandas
 yfinance
-pykrx
 feedparser
-apscheduler
-setuptools
