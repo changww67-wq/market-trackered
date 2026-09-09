@@ -4,6 +4,8 @@ import yfinance as yf
 import feedparser
 from datetime import datetime
 import streamlit as st
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # 1. 화면 렌더링 최우선 
 st.set_page_config(page_title="글로벌 증시 모니터", layout="wide", page_icon="📈")
@@ -12,7 +14,6 @@ st.caption("미국/한국 주요 기업 시세, 환율 및 뉴스 통합 피드"
 
 DB_PATH = "market_data.db"
 
-# DB 초기화 세팅
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -22,14 +23,12 @@ def init_db():
     conn.commit()
     conn.close()
 
-# 데이터 수집 (야후 파이낸스 통합)
 def fetch_market_data():
     init_db()
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # 0. 실시간 원/달러 환율 수집
     try:
         t = yf.Ticker("KRW=X")
         p = t.fast_info.last_price
@@ -38,11 +37,7 @@ def fetch_market_data():
         c.execute("INSERT INTO stock_prices VALUES (?, ?, 'FX', ?, ?, ?)", ("USD/KRW", "원/달러 환율", p, round(pct, 2), now))
     except: pass
 
-    # 1. 미국 주식 (US)
-    us_stocks = {
-        "AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "TSLA": "Tesla",
-        "AMD": "AMD", "IONQ": "IonQ"
-    }
+    us_stocks = {"AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "TSLA": "Tesla", "AMD": "AMD", "IONQ": "IonQ"}
     for sym, name in us_stocks.items():
         try:
             t = yf.Ticker(sym)
@@ -50,20 +45,13 @@ def fetch_market_data():
             prev = t.fast_info.previous_close
             pct = ((p - prev) / prev * 100) if prev else 0.0
             c.execute("INSERT INTO stock_prices VALUES (?, ?, 'US', ?, ?, ?)", (sym, name, p, round(pct, 2), now))
-            
             cal = t.calendar
             if cal is not None and not cal.empty and "Earnings Date" in cal.index:
                 dates = cal.loc["Earnings Date"].dropna().tolist()
-                if dates:
-                    c.execute("INSERT INTO earnings VALUES (?, ?, ?)", (sym, name, str(dates[0]).split(" ")[0]))
+                if dates: c.execute("INSERT INTO earnings VALUES (?, ?, ?)", (sym, name, str(dates[0]).split(" ")[0]))
         except: pass
 
-    # 2. 암호화폐 (CRYPTO)
-    crypto_assets = {
-        "BTC-USD": "비트코인",
-        "ETH-USD": "이더리움", 
-        "SOL-USD": "솔라나"
-    }
+    crypto_assets = {"BTC-USD": "비트코인", "ETH-USD": "이더리움", "SOL-USD": "솔라나"}
     for sym, name in crypto_assets.items():
         try:
             t = yf.Ticker(sym)
@@ -73,7 +61,6 @@ def fetch_market_data():
             c.execute("INSERT INTO stock_prices VALUES (?, ?, 'CRYPTO', ?, ?, ?)", (sym, name, p, round(pct, 2), now))
         except: pass
 
-    # 3. 한국 주식 (KR)
     kr_stocks = {"005930.KS": "삼성전자", "000660.KS": "SK하이닉스", "035420.KS": "NAVER", "005380.KS": "현대차"}
     for sym, name in kr_stocks.items():
         try:
@@ -84,7 +71,6 @@ def fetch_market_data():
             c.execute("INSERT INTO stock_prices VALUES (?, ?, 'KR', ?, ?, ?)", (sym.replace(".KS", ""), name, p, round(pct, 2), now))
         except: pass
 
-    # 4. 뉴스 수집
     urls = [
         ("https://news.google.com/rss/search?q=증시&hl=ko&gl=KR&ceid=KR:ko", "국내증시"),
         ("https://finance.yahoo.com/news/rssindex", "Yahoo US")
@@ -99,15 +85,13 @@ def fetch_market_data():
     conn.commit()
     conn.close()
 
-# 사이드바 컨트롤
 st.sidebar.header("⚙️ 컨트롤 패널")
 if st.sidebar.button("🔄 즉시 데이터 수집/갱신"):
-    with st.spinner("전세계 증시 데이터를 끌어오는 중입니다... (약 10초 소요)"):
+    with st.spinner("전세계 증시 데이터를 끌어오는 중입니다..."):
         fetch_market_data()
     st.sidebar.success("수집 완료!")
     st.rerun()
 
-# DB 불러오기 함수
 def load_df(query):
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -125,9 +109,8 @@ else:
     latest_time = stocks_df['updated_at'].max()
     current_stocks = stocks_df[stocks_df['updated_at'] == latest_time]
 
-    # 맨 위에 환율 정보 표시
     fx_df = current_stocks[current_stocks['market'] == 'FX']
-    fx_rate = 1350.0  # 환율 데이터를 못 가져왔을 때의 기본값
+    fx_rate = 1350.0  
     if not fx_df.empty:
         fx_row = fx_df.iloc[0]
         fx_rate = fx_row['price']
@@ -136,14 +119,10 @@ else:
 
     st.subheader("📊 주요 기업 시세")
     
-    # ---------------------------------------------------------
-    # [수정됨] 표 데이터 정리 (한글화 및 원화 환산가 추가)
-    # ---------------------------------------------------------
     def format_table(df, market_type):
         tmp = df[df['market'] == market_type].copy()
         prices = []
         krw_prices = []
-        
         for _, row in tmp.iterrows():
             if market_type in ['US', 'CRYPTO']:
                 prices.append(f"${row['price']:,.2f}")
@@ -151,17 +130,10 @@ else:
             else:
                 prices.append(f"{row['price']:,.0f} 원")
                 krw_prices.append(f"{row['price']:,.0f} 원")
-                
         tmp['현재가'] = prices
         tmp['원화 환산가'] = krw_prices
-        
-        # 영어 컬럼명을 한글로 변경
         tmp = tmp[['ticker', 'name', '현재가', '원화 환산가', 'change_pct']]
-        tmp = tmp.rename(columns={
-            'ticker': '티커',
-            'name': '종목명',
-            'change_pct': '등락률(%)'
-        })
+        tmp = tmp.rename(columns={'ticker': '티커', 'name': '종목명', 'change_pct': '등락률(%)'})
         return tmp
 
     t1, t2, t3 = st.tabs(["🇺🇸 미국 증시", "🇰🇷 한국 증시", "🪙 암호화폐"])
@@ -172,66 +144,94 @@ else:
     st.divider()
 
     # ---------------------------------------------------------
-    # [새로 추가됨] 종목별 상세 차트 뷰어 (이동평균선 포함)
+    # [새로 추가됨] 전문가용 비교 차트 뷰어 (캔들스틱 + 이평선 + RSI)
     # ---------------------------------------------------------
-    st.subheader("📈 실시간 차트 뷰어 (이동평균선)")
+    st.subheader("📈 실시간 차트 분석 (캔들스틱 & RSI)")
     
-    # 환율(FX)을 제외한 모든 종목을 선택창에 표시
     chart_options = [f"{row['name']} ({row['ticker']})" for _, row in current_stocks.iterrows() if row['market'] != 'FX']
     
     if chart_options:
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            selected_option = st.selectbox("차트를 분석할 종목을 선택하세요", chart_options)
-        with c2:
-            chart_type = st.radio("차트 주기", ["일봉 (Daily)", "월봉 (Monthly)"], horizontal=True)
-
-        # 선택된 종목의 티커(Ticker)만 추출
-        selected_ticker = selected_option.split("(")[-1].replace(")", "")
-        market_type = current_stocks[current_stocks['ticker'] == selected_ticker]['market'].values[0]
+        chart_type = st.radio("차트 주기", ["일봉 (Daily)", "월봉 (Monthly)"], horizontal=True)
         
-        # 한국 주식은 야후 파이낸스 조회를 위해 '.KS'를 붙여줌
-        yf_ticker = selected_ticker + ".KS" if market_type == 'KR' else selected_ticker
+        # 화면을 정확히 2개로 나누기 (비교 분석용)
+        col1, col2 = st.columns(2)
+        
+        # RSI 계산 함수 (14일 Wilders EMA 방식)
+        def calculate_rsi(series, period=14):
+            delta = series.diff()
+            up = delta.clip(lower=0)
+            down = -1 * delta.clip(upper=0)
+            ema_up = up.ewm(com=period-1, adjust=False).mean()
+            ema_down = down.ewm(com=period-1, adjust=False).mean()
+            rs = ema_up / ema_down
+            return 100 - (100 / (1 + rs))
 
-        with st.spinner("차트 데이터를 계산하는 중입니다..."):
-            try:
+        # 차트 그리기 전문 함수
+        def draw_professional_chart(selected_option, container):
+            selected_ticker = selected_option.split("(")[-1].replace(")", "")
+            market_type = current_stocks[current_stocks['ticker'] == selected_ticker]['market'].values[0]
+            yf_ticker = selected_ticker + ".KS" if market_type == 'KR' else selected_ticker
+
+            with container:
                 t = yf.Ticker(yf_ticker)
-                
-                # 180일/월선을 계산하기 위해 데이터를 넉넉히 가져옵니다
                 if chart_type == "일봉 (Daily)":
                     hist = t.history(period="2y", interval="1d")
                     ma_label = "일선"
+                    display_tail = 250
                 else:
                     hist = t.history(period="15y", interval="1mo")
                     ma_label = "월선"
+                    display_tail = 60
 
                 if not hist.empty:
-                    # 5, 20, 60, 180 이동평균선 계산
+                    # 이평선 및 RSI 계산
                     hist[f'5{ma_label}'] = hist['Close'].rolling(5).mean()
                     hist[f'20{ma_label}'] = hist['Close'].rolling(20).mean()
                     hist[f'60{ma_label}'] = hist['Close'].rolling(60).mean()
                     hist[f'180{ma_label}'] = hist['Close'].rolling(180).mean()
+                    hist['RSI'] = calculate_rsi(hist['Close'])
                     
-                    # 보여줄 때는 최근 1년(일봉) / 최근 5년(월봉) 치만 자름
-                    if chart_type == "일봉 (Daily)":
-                        hist = hist.tail(250)
-                    else:
-                        hist = hist.tail(60)
+                    hist = hist.tail(display_tail)
 
-                    # 차트에 그릴 데이터만 추려서 이름 변경
-                    chart_data = hist[['Close', f'5{ma_label}', f'20{ma_label}', f'60{ma_label}', f'180{ma_label}']].copy()
-                    chart_data.rename(columns={'Close': '종가'}, inplace=True)
+                    # 2층 구조 차트 만들기 (위: 캔들 / 아래: RSI)
+                    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
+                                        vertical_spacing=0.05, row_heights=[0.7, 0.3])
                     
-                    # 선 굵기와 색상 자동 최적화
-                    st.line_chart(chart_data)
+                    # 1. 캔들차트 (한국식 빨강/파랑 색상 적용)
+                    fig.add_trace(go.Candlestick(x=hist.index, open=hist['Open'], high=hist['High'], low=hist['Low'], close=hist['Close'],
+                                                 increasing_line_color='red', decreasing_line_color='blue', name='캔들'), row=1, col=1)
+                    
+                    # 2. 이동평균선
+                    colors = ['orange', 'purple', 'green', 'black']
+                    for idx, ma in enumerate(['5', '20', '60', '180']):
+                        col_name = f"{ma}{ma_label}"
+                        if col_name in hist.columns:
+                            fig.add_trace(go.Scatter(x=hist.index, y=hist[col_name], mode='lines', 
+                                                     name=col_name, line=dict(width=1.5, color=colors[idx])), row=1, col=1)
+                            
+                    # 3. RSI 차트
+                    fig.add_trace(go.Scatter(x=hist.index, y=hist['RSI'], mode='lines', name='RSI', line=dict(color='magenta')), row=2, col=1)
+                    # RSI 기준선 (30, 70)
+                    fig.add_hline(y=70, line_dash="dash", line_color="gray", row=2, col=1)
+                    fig.add_hline(y=30, line_dash="dash", line_color="gray", row=2, col=1)
+
+                    fig.update_layout(xaxis_rangeslider_visible=False, height=550, margin=dict(l=0, r=0, t=10, b=0), showlegend=False)
+                    st.plotly_chart(fig, use_container_width=True)
                 else:
-                    st.warning("차트 데이터를 불러올 수 없습니다.")
-            except Exception as e:
-                st.error("차트 생성 중 오류가 발생했습니다.")
-                
+                    st.warning("데이터를 불러올 수 없습니다.")
+
+        # 좌측 차트
+        with col1:
+            sel1 = st.selectbox("비교 종목 1", chart_options, index=0)
+            draw_professional_chart(sel1, st.container())
+            
+        # 우측 차트
+        with col2:
+            sel2 = st.selectbox("비교 종목 2", chart_options, index=1 if len(chart_options) > 1 else 0)
+            draw_professional_chart(sel2, st.container())
+
     st.divider()
 
-    # 실적 & 뉴스
     c1, c2 = st.columns([1, 1])
     with c1:
         st.subheader("📅 실적 발표일")
