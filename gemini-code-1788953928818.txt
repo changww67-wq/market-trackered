@@ -1,6 +1,0 @@
-streamlit
-pandas
-yfinance
-pykrx
-feedparser
-apscheduler
