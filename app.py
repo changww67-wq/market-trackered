@@ -75,7 +75,7 @@ def update_kr_stocks(tickers={"005930": "삼성전자", "000660": "SK하이닉�
     for code, name in tickers.items():
         try:
             df = stock.get_market_ohlcv_by_date(today, today, code)
-            if df.empty: # 장 시작 전이나 휴일이면 최근 5일 데이터 가져옴
+            if df.empty: 
                 df = stock.get_market_ohlcv_by_date((datetime.now() - pd.Timedelta(days=5)).strftime("%Y%m%d"), today, code)
             if not df.empty:
                 latest = df.iloc[-1]
@@ -133,20 +133,37 @@ def load_data(query):
 # ---------------------------------------------------------
 st.set_page_config(page_title="글로벌 증시 & 실적 모니터", layout="wide", page_icon="📈")
 st.title("🌐 글로벌 증시 실시간 대시보드")
-st.caption("미국/한국 주요 기업 시세, 어닝 캘린더, 실시간 금융 뉴스 통합 피드")
 
-# 최초 접속 시 DB가 없으면 자동 생성 및 수집
+# 최초 접속 시 DB가 없으면 자동 생성 및 수집 (추적 모드)
 try:
     load_data("SELECT 1 FROM stock_prices")
 except Exception:
-    with st.spinner("초기 데이터를 수집 중입니다. 10~20초 정도 소요됩니다..."):
-        run_full_update()
+    st.error("🚀 최초 데이터 수집을 시작합니다. 화면에서 어느 구간이 멈추는지 확인해 주세요!")
+    
+    st.write("👉 1/4: 데이터베이스 세팅 중...")
+    init_db()
+    st.success("✅ DB 세팅 완료")
+    
+    st.write("👉 2/4: 🇺🇸 미국 주식 데이터 가져오는 중... (여기서 멈추면 야후 차단)")
+    update_us_stocks()
+    st.success("✅ 미국 주식 완료")
+    
+    st.write("👉 3/4: 🇰🇷 한국 주식 데이터 가져오는 중... (여기서 멈추면 한국거래소 차단)")
+    update_kr_stocks()
+    st.success("✅ 한국 주식 완료")
+    
+    st.write("👉 4/4: 📰 실시간 뉴스 가져오는 중...")
+    update_news()
+    st.success("✅ 뉴스 완료")
+    
+    st.info("🎉 모든 수집이 완료되었습니다! 화면을 새로고침(F5) 해주세요.")
+    st.stop()
 
 # 새로고침 버튼
 if st.sidebar.button("🔄 지금 즉각 데이터 갱신"):
     with st.spinner("최신 데이터를 가져오는 중입니다..."):
         run_full_update()
-    st.sidebar.success("갱신 완료!")
+    st.rerun()
 
 # 시세 섹션
 st.subheader("📊 주요 종목 현황")
