@@ -2,12 +2,11 @@ import sqlite3
 from datetime import datetime
 import feedparser
 import pandas as pd
-from pykrx import stock
 import yfinance as yf
 import streamlit as st
 
 # ---------------------------------------------------------
-# 1. 백엔드: 데이터 수집 및 DB 관리 기능
+# 1. 백엔드: 데이터 수집 및 DB 관리
 # ---------------------------------------------------------
 DB_PATH = "market_data.db"
 
@@ -66,25 +65,25 @@ def update_us_stocks(tickers=["AAPL", "MSFT", "NVDA", "TSLA", "GOOGL", "AMD"]):
     conn.commit()
     conn.close()
 
-def update_kr_stocks(tickers={"005930": "삼성전자", "000660": "SK하이닉스", "035420": "NAVER", "005380": "현대차"}):
+def update_kr_stocks(tickers={"005930.KS": "삼성전자", "000660.KS": "SK하이닉스", "035420.KS": "NAVER", "005380.KS": "현대차"}):
+    # pykrx 대신 yfinance로 한국 주식 수집 (.KS 활용)
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    today = datetime.now().strftime("%Y%m%d")
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     for code, name in tickers.items():
         try:
-            df = stock.get_market_ohlcv_by_date(today, today, code)
-            if df.empty: 
-                df = stock.get_market_ohlcv_by_date((datetime.now() - pd.Timedelta(days=5)).strftime("%Y%m%d"), today, code)
-            if not df.empty:
-                latest = df.iloc[-1]
-                price = float(latest["종가"])
-                change_pct = float(latest["등락률"])
-                cursor.execute(
-                    "INSERT OR REPLACE INTO stock_prices (ticker, name, market, price, change_pct, updated_at) VALUES (?, ?, 'KR', ?, ?, ?)",
-                    (code, name, price, change_pct, now_str)
-                )
+            t = yf.Ticker(code)
+            info = t.fast_info
+            price = info.last_price
+            prev_close = info.previous_close
+            change_pct = (((price - prev_close) / prev_close * 100) if prev_close else 0.0)
+            
+            display_code = code.replace(".KS", "")
+            cursor.execute(
+                "INSERT OR REPLACE INTO stock_prices (ticker, name, market, price, change_pct, updated_at) VALUES (?, ?, 'KR', ?, ?, ?)",
+                (display_code, name, price, round(change_pct, 2), now_str)
+            )
         except Exception:
             pass
     conn.commit()
@@ -134,38 +133,18 @@ def load_data(query):
 st.set_page_config(page_title="글로벌 증시 & 실적 모니터", layout="wide", page_icon="📈")
 st.title("🌐 글로벌 증시 실시간 대시보드")
 
-# 최초 접속 시 DB가 없으면 자동 생성 및 수집 (추적 모드)
 try:
     load_data("SELECT 1 FROM stock_prices")
 except Exception:
-    st.error("🚀 최초 데이터 수집을 시작합니다. 화면에서 어느 구간이 멈추는지 확인해 주세요!")
-    
-    st.write("👉 1/4: 데이터베이스 세팅 중...")
-    init_db()
-    st.success("✅ DB 세팅 완료")
-    
-    st.write("👉 2/4: 🇺🇸 미국 주식 데이터 가져오는 중... (여기서 멈추면 야후 차단)")
-    update_us_stocks()
-    st.success("✅ 미국 주식 완료")
-    
-    st.write("👉 3/4: 🇰🇷 한국 주식 데이터 가져오는 중... (여기서 멈추면 한국거래소 차단)")
-    update_kr_stocks()
-    st.success("✅ 한국 주식 완료")
-    
-    st.write("👉 4/4: 📰 실시간 뉴스 가져오는 중...")
-    update_news()
-    st.success("✅ 뉴스 완료")
-    
-    st.info("🎉 모든 수집이 완료되었습니다! 화면을 새로고침(F5) 해주세요.")
-    st.stop()
+    with st.spinner("최초 데이터를 수집 중입니다..."):
+        run_full_update()
+    st.rerun()
 
-# 새로고침 버튼
 if st.sidebar.button("🔄 지금 즉각 데이터 갱신"):
     with st.spinner("최신 데이터를 가져오는 중입니다..."):
         run_full_update()
     st.rerun()
 
-# 시세 섹션
 st.subheader("📊 주요 종목 현황")
 stocks_df = load_data("""
     SELECT ticker, name, market, price, change_pct, updated_at 
@@ -194,7 +173,6 @@ else:
 
 st.divider()
 
-# 실적 캘린더 & 뉴스 섹션
 col_cal, col_news = st.columns([1, 1])
 
 with col_cal:
