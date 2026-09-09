@@ -30,7 +30,7 @@ def fetch_market_data():
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # 미국 주식
-    us_stocks = {"AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "TSLA": "Tesla"}
+    us_stocks = {"AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "TSLA": "Tesla", "AMD": "ASML", "GOOGLE": "BITCOIN"}
     for sym, name in us_stocks.items():
         try:
             t = yf.Ticker(sym)
